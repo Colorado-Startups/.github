@@ -1,0 +1,5 @@
+# DCO app (dcoapp): a commit authored by a member of the Colorado-Startups org and verified by GitHub (signed) skips
+# the Signed-off-by line; every outside contributor still signs off (Paul, 2026-11-02). The app reads this file from
+# the default branch. Reverse: delete this file, and then every commit needs a sign-off again.
+require:
+  members: false
