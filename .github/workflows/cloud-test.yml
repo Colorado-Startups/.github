@@ -12,7 +12,8 @@ name: cloud-test
 # `ref` input. It passes the one validated entry to the shards as JSON through env, so no shard reads an allowlist
 # from the code under test. cloud-test/cloud_test.py in this repo holds every rule; this file only wires runners
 # to it. Each job checks that script out of this repo at job.workflow_sha, the commit the caller pinned, so the
-# caller's pin covers every file that runs. cloud-test/README.md has the allowlist format.
+# caller's pin covers every file that runs, and the plan job refuses a caller in another repo that pins a branch
+# or tag instead of a full SHA. cloud-test/README.md has the allowlist format.
 #
 # Money: free tiers and included minutes only (Paul, 2026-11-02). Shards run on the CI_RUNNER variable, a plain
 # label, else ubuntu-latest; cloud_test.py refuses larger and self-hosted runners. Every job has a timeout.
@@ -107,6 +108,8 @@ jobs:
           SHARDS: ${{ inputs.shards }}
           PYTHON: ${{ inputs.python }}
           CI_RUNNER: ${{ vars.CI_RUNNER }}
+          CLOUD_TEST_WORKFLOW_REF: ${{ job.workflow_ref }}
+          CLOUD_TEST_WORKFLOW_REPO: ${{ job.workflow_repository }}
         run: |
           python3 -I cloud-test/cloud_test.py plan --allowlist=caller/.github/cloud-test.json \
             --script="$SCRIPT" --shards="$SHARDS" --python="$PYTHON" --sha="$SHA"

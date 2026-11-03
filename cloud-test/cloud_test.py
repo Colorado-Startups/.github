@@ -245,6 +245,26 @@ def runner(value: str) -> tuple:
     )
 
 
+def check_pin(workflow_ref: str, workflow_repo: str, caller_repo: str) -> str:
+    """A warning, or "" when the caller pinned this workflow safely. A cross-repo caller must pin a full SHA.
+
+    A branch or tag pin (job.workflow_ref ends in @refs/heads/... or @refs/tags/...) would let a later push to this
+    repo change what every caller runs, so it is refused. A call from this repo itself always passes. A ref in a
+    form GitHub has not documented only warns, so a format change can never stop every caller at once.
+    """
+    if not workflow_repo or not caller_repo or workflow_repo.lower() == caller_repo.lower():
+        return ""
+    ref = workflow_ref.rsplit("@", 1)[1] if "@" in (workflow_ref or "") else ""
+    if SHA_RE.fullmatch(ref):
+        return ""
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        raise UsageError(
+            f"{caller_repo} calls the shared workflow at {ref}; pin `uses:` to a full commit SHA of"
+            f" {workflow_repo} main, so a later push here cannot change what runs there"
+        )
+    return f"could not read the pin from job.workflow_ref {workflow_ref!r}; pin `uses:` to a full commit SHA"
+
+
 def resolve(ref: str, environ) -> str:
     """The commit SHA REF names now, so every shard tests one commit even if the branch moves."""
     check_ref(ref)
@@ -503,6 +523,14 @@ def self_test() -> int:
     throws("shard total past the maximum", lambda: argv_for(unit, 1, 9))
     throws("an unshardable script in 2", lambda: argv_for(verify, 1, 2))
 
+    wf = "Colorado-Startups/.github/.github/workflows/cloud-test.yml"
+    org, caller = "Colorado-Startups/.github", "Colorado-Startups/brand"
+    equal("a SHA pin from another repo", lambda: check_pin(f"{wf}@{sha}", org, caller), "")
+    equal("a call from this repo itself", lambda: check_pin(f"{wf}@refs/pull/7/merge", org, org), "")
+    equal("an undocumented pin form warns", lambda: bool(check_pin(f"{wf}@abc", org, caller)), True)
+    throws("a branch pin from another repo", lambda: check_pin(f"{wf}@refs/heads/main", org, caller))
+    throws("a tag pin from another repo", lambda: check_pin(f"{wf}@refs/tags/v1", org, caller))
+
     equal("no runner", lambda: runner(""), (json.dumps("ubuntu-latest"), ""))
     equal("a standard label", lambda: runner("ubuntu-24.04"), (json.dumps("ubuntu-24.04"), ""))
     equal("Blacksmith warns", lambda: bool(runner("blacksmith-2vcpu-ubuntu-2404")[1]), True)
@@ -567,12 +595,17 @@ def main(argv: list) -> int:
             print(resolve(args.ref, os.environ))
             return 0
         if args.mode == "plan":
+            env = os.environ
+            pin = check_pin(env.get("CLOUD_TEST_WORKFLOW_REF", ""), env.get("CLOUD_TEST_WORKFLOW_REPO", ""),
+                            env.get("GITHUB_REPOSITORY", ""))
             p = plan(load(args.allowlist), args.script, args.shards, args.python)
-            runs_on, warning = runner(os.environ.get("CI_RUNNER", ""))
+            runs_on, warning = runner(env.get("CI_RUNNER", ""))
             if p["note"]:
                 print(f"::notice title=cloud-test::{p['note']}")
             if warning:
                 print(f"::warning title=cloud-test runner::{warning}")
+            if pin:
+                print(f"::warning title=cloud-test pin::{pin}")
             output(
                 {
                     "script": p["script"],

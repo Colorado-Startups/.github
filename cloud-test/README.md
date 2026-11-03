@@ -3,7 +3,7 @@
 Cloud first, the Mac last and small (Paul, 2026-11-02). Test suites, builds, browsers, e2e runs and every render or
 GPU job run on hosted runners; the MacBook Air runs only rare, seconds-long checks, such as one test file or one
 lint. Every Colorado Startups repo reaches the cloud through one shared workflow. The house rule is
-`~/.claude/rules/compute.md` (canonical source: Claude-OS `rules/compute.md`); where it and this page disagree, the
+`~/.claude/rules/compute.md` (canonical source: Code-OS `rules/compute.md`); where it and this page disagree, the
 rule wins and this page gets fixed.
 
 ```mermaid
@@ -37,7 +37,7 @@ flowchart LR
 The compute line, near the repo's testing or gates section:
 
 ```markdown
-**Compute:** cloud first, the Mac last and small (Paul, 2026-11-02). CI, test suites, builds, browsers, e2e, renders and GPU jobs run in the cloud (`.github/workflows/cloud-test.yml` here). The MacBook Air runs only rare, seconds-long checks, such as one test file or one lint. House rule: `~/.claude/rules/compute.md` (canonical: Claude-OS `rules/compute.md`), which wins any disagreement.
+**Compute:** cloud first, the Mac last and small (Paul, 2026-11-02). CI, test suites, builds, browsers, e2e, renders and GPU jobs run in the cloud (`.github/workflows/cloud-test.yml` here). The MacBook Air runs only rare, seconds-long checks, such as one test file or one lint. House rule: `~/.claude/rules/compute.md` (canonical: Code-OS `rules/compute.md`), which wins any disagreement.
 ```
 
 The gate-table row, in the table that says which gates fire and which wait:
@@ -135,6 +135,7 @@ pip caches the shards restore.
   that starts with `-` or holds `..` never reaches git; a branch name resolves to one commit for every shard.
 - The token is `contents: read`, the workflow takes no secrets, and every action is pinned to a full SHA.
 - Each job checks `cloud_test.py` and the setup action out of this repo at `job.workflow_sha`, the commit the caller
-  pinned. A caller's pin covers every file that runs.
+  pinned. A caller's pin covers every file that runs. The plan job refuses a caller in another repo that pins a
+  branch or tag (`job.workflow_ref` ending in `refs/heads/` or `refs/tags/`), and warns on any form it cannot read.
 - Anyone who can push a branch can already change that branch's workflows. The allowlist bounds what a dispatch
   input reaches from the default branch's caller, not what a branch's own code does.
