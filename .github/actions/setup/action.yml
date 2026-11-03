@@ -1,0 +1,73 @@
+# The setup a Colorado Startups CI job shares, after actions/checkout. The shared cloud-test workflow runs it on
+# every shard, and any repo's own workflow may call it too, pinned to a full SHA:
+#
+#   - uses: Colorado-Startups/.github/.github/actions/setup@<sha>
+#
+# Node comes from node-version, else from .nvmrc, else the runner's own. When package-lock.json exists, npm's
+# download cache is restored by actions/setup-node and `npm ci` always runs, so no job ever restores a node_modules
+# tree that another run built. Python comes from python-version, and pip-requirements are installed with pip's
+# download cache; without python-version the runner's python3 stays. In a job with `cache-mode: read`, as on every
+# cloud-test shard, the caches only restore. Every input reaches a shell only through env.
+name: setup
+description: Node from a version or .nvmrc with npm ci on npm's download cache, and Python with pip requirements.
+inputs:
+  node-version:
+    description: Node version. Empty uses .nvmrc when the repo has one
+    required: false
+    default: ""
+  python-version:
+    description: Python version. Empty keeps the runner's python3
+    required: false
+    default: ""
+  pip-requirements:
+    description: Requirement files to pip install, one per line. Needs python-version
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      run: |
+        if [ -f .nvmrc ]; then echo nvmrc=true; else echo nvmrc=false; fi >> "$GITHUB_OUTPUT"
+        if [ -f package-lock.json ]; then echo lockfile=true; else echo lockfile=false; fi >> "$GITHUB_OUTPUT"
+
+    - if: inputs.node-version != ''
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ steps.detect.outputs.lockfile == 'true' && 'npm' || '' }}
+
+    - if: inputs.node-version == '' && steps.detect.outputs.nvmrc == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+        cache: ${{ steps.detect.outputs.lockfile == 'true' && 'npm' || '' }}
+
+    - if: inputs.node-version == '' && steps.detect.outputs.nvmrc != 'true' && steps.detect.outputs.lockfile == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        cache: npm
+
+    - if: steps.detect.outputs.lockfile == 'true'
+      shell: bash
+      run: npm ci
+
+    - if: inputs.python-version != ''
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: ${{ inputs.pip-requirements != '' && 'pip' || '' }}
+        cache-dependency-path: ${{ inputs.pip-requirements }}
+
+    - if: inputs.pip-requirements != ''
+      shell: bash
+      env:
+        PIP_REQUIREMENTS: ${{ inputs.pip-requirements }}
+      run: |
+        set -euo pipefail
+        args=()
+        while IFS= read -r file; do
+          if [ -n "$file" ]; then args+=(--requirement "$file"); fi
+        done <<< "$PIP_REQUIREMENTS"
+        python -m pip install --quiet "${args[@]}"
