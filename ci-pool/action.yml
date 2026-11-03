@@ -1,0 +1,71 @@
+# The org CI pool's step, run first in a workflow's change-detection job on ubuntu-slim (Code-OS templates/ci/):
+#
+#   - uses: Colorado-Startups/.github/ci-pool@<full sha>
+#     id: pool
+#     with:
+#       pool: ${{ vars.CI_POOL }}
+#       override: ${{ vars.CI_RUNNER }}
+#       paths: |
+#         src/**
+#         package-lock.json
+#       base: ${{ github.event.pull_request.base.sha || github.event.before }}
+#
+# Then a standard job takes `runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}` and `if: needs.changes.outputs.run
+# == 'true'`; a short job hard-codes `runs-on: ubuntu-slim`. ci_pool.py, beside this file, holds every rule: Blacksmith
+# while the meter's org-wide reading is fresh, complete and under the stop, GitHub-hosted otherwise and whenever
+# anything cannot be read. The step never fails a run. Inputs reach the script only through env. The change needs
+# history to the base: check out with fetch-depth 0, or the step cannot list it and says run.
+name: ci-pool
+description: The runner for a standard job from the org's free CI pool, and whether the change touched the job's paths.
+inputs:
+  pool:
+    description: The meter's reading, always ${{ vars.CI_POOL }}. Empty means GitHub-hosted
+    required: false
+    default: ""
+  override:
+    description: The off switch, ${{ vars.CI_RUNNER }}. A standard GitHub-hosted label wins; any other label is ignored
+    required: false
+    default: ""
+  arch:
+    description: x64, or arm for a job that runs on either (Blacksmith counts an ARM minute as 0.625)
+    required: false
+    default: x64
+  paths:
+    description: Path globs, one per line, that make the job run. Empty runs on every change
+    required: false
+    default: ""
+  base:
+    description: The commit the change starts from. Empty, all zeros or unknown means run
+    required: false
+    default: ""
+outputs:
+  runner:
+    description: The runner as JSON, for runs-on with fromJSON
+    value: ${{ steps.choose.outputs.runner }}
+  label:
+    description: The runner label as plain text
+    value: ${{ steps.choose.outputs.label }}
+  reason:
+    description: Why the chooser picked it
+    value: ${{ steps.choose.outputs.reason }}
+  run:
+    description: true when the job should run
+    value: ${{ steps.changes.outputs.run }}
+runs:
+  using: composite
+  steps:
+    - id: choose
+      shell: bash
+      env:
+        CI_POOL: ${{ inputs.pool }}
+        CI_RUNNER: ${{ inputs.override }}
+        ARCH: ${{ inputs.arch }}
+        SCRIPT: ${{ github.action_path }}/ci_pool.py
+      run: python3 -I "$SCRIPT" choose --size=standard --arch="$ARCH"
+    - id: changes
+      shell: bash
+      env:
+        PATHS: ${{ inputs.paths }}
+        BASE: ${{ inputs.base }}
+        SCRIPT: ${{ github.action_path }}/ci_pool.py
+      run: python3 -I "$SCRIPT" changes --paths="$PATHS" --base="$BASE"

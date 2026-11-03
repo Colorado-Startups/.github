@@ -1,0 +1,62 @@
+name: ci-pool-meter
+
+# The org CI pool's meter (Paul, 2026-11-03: "No one repo gets assigned the minutes"). Once an hour it reads every
+# Colorado Startups repo's job records, counts the org's free Blacksmith minutes over a rolling 31 days, and writes
+# the reading to the org variable CI_POOL, which every repo's chooser reads as ${{ vars.CI_POOL }} with no token.
+# ci-pool/ci_pool.py holds every rule, and ci-pool/README.md the design and what Paul creates.
+#
+# This repo is public, so these minutes on a standard runner cost nothing. The App's key lives in the
+# `ci-pool-meter` environment, which only main may use, so no pull request run can reach it. Until Paul creates the
+# App (CI_POOL_APP_CLIENT_ID is empty), the job is skipped, CI_POOL stays empty, and every chooser picks GitHub-hosted.
+# A pass that cannot read leaves CI_POOL as it was; three hours later the chooser calls it stale, GitHub-hosted again.
+# GitHub turns off a public repo's schedule after 60 days with no activity; that also fails safe the same way.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-pool-meter
+  cancel-in-progress: false
+
+jobs:
+  meter:
+    if: github.ref == 'refs/heads/main' && vars.CI_POOL_APP_CLIENT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ci-pool-meter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: ci-pool
+          persist-credentials: false
+
+      # The ledger: each finished run's minutes, so a pass reads only what is new. A lost ledger only costs reads;
+      # until the meter catches up its reading says complete: false and the chooser stays on GitHub-hosted.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ledger.json
+          key: ci-pool-ledger-${{ github.run_id }}
+          restore-keys: ci-pool-ledger-
+
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.CI_POOL_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_POOL_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Read the pool and write CI_POOL
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ORG: ${{ github.repository_owner }}
+        run: python3 -I ci-pool/ci_pool.py meter --org="$ORG" --ledger=ledger.json --write
+
+      - if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ledger.json
+          key: ci-pool-ledger-${{ github.run_id }}

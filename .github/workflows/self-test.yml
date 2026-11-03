@@ -11,6 +11,8 @@ on:
   pull_request:
     paths:
       - cloud-test/**
+      - ci-pool/**
+      - .github/workflows/ci-pool-meter.yml
       - .github/workflows/cloud-test.yml
       - .github/workflows/self-test.yml
       - .github/actions/**
@@ -20,6 +22,8 @@ on:
     branches: [main]
     paths:
       - cloud-test/**
+      - ci-pool/**
+      - .github/workflows/ci-pool-meter.yml
       - .github/workflows/cloud-test.yml
       - .github/workflows/self-test.yml
       - .github/actions/**
@@ -44,6 +48,47 @@ jobs:
           persist-credentials: false
       - run: python3 -I cloud-test/cloud_test.py --self-test
       - run: python3 -I cloud-test/cloud_test.py check --allowlist=.github/cloud-test.json
+      - run: python3 -I ci-pool/ci_pool.py --self-test
+
+  # The chooser as a repo calls it: the composite action from this commit, with no reading (GitHub-hosted, the safe
+  # default), then the job it picked. A known-bad reading must also land on GitHub-hosted.
+  ci-pool:
+    needs: self-test
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      runner: ${{ steps.pool.outputs.runner }}
+      run: ${{ steps.pool.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./ci-pool
+        id: pool
+        with:
+          pool: ""
+          paths: ci-pool/**
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - uses: ./ci-pool
+        id: bad
+        with:
+          pool: '{"version":1,"at":"2020-01-01T00:00:00Z","complete":true,"blacksmith":{"used":0}}'
+          override: blacksmith-2vcpu-ubuntu-2404
+      - env:
+          GOOD: ${{ steps.pool.outputs.label }}
+          BAD: ${{ steps.bad.outputs.label }}
+        run: |
+          test "$GOOD" = ubuntu-latest || { echo "::error::no reading chose $GOOD"; exit 1; }
+          test "$BAD" = ubuntu-latest || { echo "::error::a stale reading chose $BAD"; exit 1; }
+
+  ci-pool-job:
+    needs: ci-pool
+    if: needs.ci-pool.outputs.run == 'true'
+    runs-on: ${{ needs.ci-pool.outputs.runner && fromJSON(needs.ci-pool.outputs.runner) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - run: echo "ran on the chosen runner"
 
   smoke:
     needs: self-test
