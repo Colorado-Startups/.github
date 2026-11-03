@@ -50,7 +50,7 @@ REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}")
 LABEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}")
 TOP_KEYS = {"$comment", "version", "node_modules", "pip", "scripts"}
-ENTRY_KEYS = {"$comment", "run", "shard", "before", "cache", "artifacts", "timeout"}
+ENTRY_KEYS = {"$comment", "run", "shard", "before", "cwd", "pip", "cache", "artifacts", "timeout"}
 
 
 class UsageError(Exception):
@@ -144,6 +144,8 @@ def validate(doc) -> dict:
         e["before"] = [_argv(b, f"scripts.{name}.before[{i}]") for i, b in enumerate(before)]
         e["cache"] = _paths(entry.get("cache", []), f"scripts.{name}.cache", home=True)
         e["artifacts"] = _paths(entry.get("artifacts", []), f"scripts.{name}.artifacts")
+        e["cwd"] = _path(entry["cwd"], f"scripts.{name}.cwd") if "cwd" in entry else "."
+        e["pip"] = _paths(entry.get("pip", []), f"scripts.{name}.pip")
         timeout = entry.get("timeout", DEFAULT_TIMEOUT)
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT:
             raise UsageError(f"scripts.{name}.timeout must be whole minutes from 1 to {MAX_TIMEOUT}")
@@ -178,8 +180,9 @@ def plan(allow: dict, script: str, shards="1", python: str = "") -> dict:
     if not re.fullmatch(r"[0-9]{1,2}", text) or not 1 <= int(text) <= MAX_SHARDS:
         raise UsageError(f"shards must be a whole number from 1 to {MAX_SHARDS}, got {shards!r}")
     n = int(text)
-    if allow["pip"] and not python:
-        raise UsageError('the allowlist lists "pip" requirements, so the caller must pass the python input')
+    pip = allow["pip"] + [p for p in entry["pip"] if p not in allow["pip"]]
+    if pip and not python:
+        raise UsageError(f'{script} needs "pip" requirements, so the caller must pass the python input')
     total = n if entry["shard"] else 1
     return {
         "script": script,
@@ -190,7 +193,7 @@ def plan(allow: dict, script: str, shards="1", python: str = "") -> dict:
         "cache": entry["cache"],
         "artifacts": entry["artifacts"],
         "node_modules": allow["node_modules"],
-        "pip": allow["pip"],
+        "pip": pip,
         "note": f"{script} has no shard entry, so it runs as one job" if total < n else "",
     }
 
@@ -281,13 +284,13 @@ def output(pairs: dict) -> None:
             f.write(text)
 
 
-def execute(argv: list, env: dict) -> tuple:
+def execute(argv: list, env: dict, cwd: str = ".") -> tuple:
     """(exit code, last lines) of one command, streaming its output. A command that will not start is exit 3."""
     tail: list = []
     try:
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, cwd=cwd)
     except OSError as err:
-        return 3, [f"could not start {argv[0]}: {err.strerror}"]
+        return 3, [f"could not start {argv[0]} in {cwd}: {err.strerror}"]
     assert proc.stdout is not None
     for raw in proc.stdout:
         sys.stdout.buffer.write(raw)
@@ -306,7 +309,7 @@ def run(allowlist, script, index, total) -> int:
     code, lines = 0, []
     for before in entry["before"] + [argv]:
         print(f"::group::{' '.join(before)}" if before is not argv else f"+ {' '.join(before)}", flush=True)
-        code, lines = execute(before, env)
+        code, lines = execute(before, env, entry["cwd"])
         if before is not argv:
             print("::endgroup::", flush=True)
         if code != 0:
@@ -363,7 +366,14 @@ def self_test() -> int:
         "scripts": {
             "verify": {"run": ["bash", "tools/verify.sh"]},
             "test:unit": {"run": ["npm", "run", "test:unit"], "shard": ["--", "--shard={index}/{total}"]},
-            "render": {"run": ["python3", "build.py"], "artifacts": ["out/"], "cache": ["~/.cache/x"], "timeout": 30},
+            "render": {
+                "run": ["python3", "build.py"],
+                "cwd": "deliverables",
+                "pip": ["requirements.txt"],
+                "artifacts": ["out/"],
+                "cache": ["~/.cache/x"],
+                "timeout": 30,
+            },
         },
     }
     allow = validate(good)
@@ -397,6 +407,9 @@ def self_test() -> int:
     throws("artifacts under ~", bad(entry={"run": ["true"], "artifacts": ["~/x"]}))
     throws("pip as a flag", bad(pip=["-r", "x"]))
     throws("before as one argv", bad(entry={"run": ["true"], "before": ["npm", "ci"]}))
+    throws("cwd escaping the checkout", bad(entry={"run": ["true"], "cwd": "../x"}))
+    throws("cwd as a list", bad(entry={"run": ["true"], "cwd": ["a"]}))
+    throws("entry pip as a string", bad(entry={"run": ["true"], "pip": "requirements.txt"}))
 
     for ref in ("-x", "a..b", "a b", "a;rm", "", "main/", "x.lock", "a//b", "$(id)", "--upload-pack=x"):
         throws(f"ref {ref!r}", lambda r=ref: check_ref(r))
@@ -407,6 +420,13 @@ def self_test() -> int:
     for shards in ("0", "9", "1.5", "-1", "two", "", "1e1"):
         throws(f"shards {shards!r}", lambda s=shards: plan(allow, "test:unit", s))
     throws("pip with no python", lambda: plan(validate(dict(good, pip=["requirements.txt"])), "verify"))
+    throws("entry pip with no python", lambda: plan(allow, "render"))
+    equal("entry pip", plan(allow, "render", python="3.12")["pip"], ["requirements.txt"])
+    equal("no pip elsewhere", plan(allow, "verify")["pip"], [])
+    equal("default cwd", allow["scripts"]["verify"]["cwd"], ".")
+    code, lines = execute([sys.executable, "-c", "import os; print(os.path.basename(os.getcwd()))"],
+                          dict(os.environ), tempfile.gettempdir())
+    equal("cwd reaches the command", lines[-1:], [os.path.basename(os.path.realpath(tempfile.gettempdir()))])
     equal("test:unit in 3", plan(allow, "test:unit", "3")["matrix"], [1, 2, 3])
     equal("verify asked for 4", plan(allow, "verify", "4")["total"], 1)
     equal("a note when shards drop", bool(plan(allow, "verify", "4")["note"]), True)

@@ -58,7 +58,7 @@ The ref must contain `.github/cloud-test.json`, so a branch cut before the calle
       "cache": ["~/.cache/ms-playwright"],
       "timeout": 30
     },
-    "render": { "run": ["python3", "build.py"], "artifacts": ["out/"] }
+    "render": { "run": ["python3", "build.py"], "cwd": "deliverables", "pip": ["deliverables/requirements.txt"], "artifacts": ["deliverables/out/"] }
   }
 }
 ```
@@ -67,11 +67,13 @@ The ref must contain `.github/cloud-test.json`, so a branch cut before the calle
 | --- | --- |
 | `version` | Always `1` |
 | `node_modules` | Paths cached on the lockfile when `package-lock.json` exists. Default `["node_modules"]` |
-| `pip` | Requirement files installed with pip. The caller must pass `python` |
+| `pip` | Requirement files installed with pip before every script. The caller must pass `python` when any apply |
 | `scripts.<name>` | A name that matches `[a-z0-9][a-z0-9:._-]{0,63}` |
 | `run` | The command, as an argv list. No shell reads it, so `;`, `\|` and `$(...)` are plain characters |
 | `shard` | Arguments appended when a run has more than one shard. `{index}` and `{total}` are filled in. Without it the script runs as one job. Every shard also gets `CLOUD_TEST_SHARD_INDEX` and `CLOUD_TEST_SHARD_TOTAL` |
 | `before` | Commands run first, in order, each an argv list |
+| `cwd` | The folder `before` and `run` start in, relative to the checkout. Default the checkout root |
+| `pip` (in a script) | More requirement files, installed only for this script |
 | `cache` | Extra paths cached for this script, keyed on the lockfiles. `~/` is allowed |
 | `artifacts` | Paths uploaded after the run, kept 7 days. How a render comes back |
 | `timeout` | Minutes for each shard, 1 to 60. Default 20 |
