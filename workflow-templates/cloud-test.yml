@@ -12,7 +12,8 @@ name: cloud-test
 # The allowlist is read from the default branch, or on a pull request from its merge commit; a `ref` input tests
 # another commit with that allowlist. A pull request that changes this file or the allowlist runs the default
 # script once, which proves the wiring; the path filter keeps every other pull request from spending minutes.
-# Pin the shared workflow to a full commit SHA of Colorado-Startups/.github main, never a branch.
+# Pin the shared workflow to a full commit SHA of Colorado-Startups/.github main, never a branch: the plan job
+# refuses a branch or tag pin.
 on:
   pull_request:
     paths:
@@ -46,7 +47,7 @@ concurrency:
 
 jobs:
   cloud-test:
-    uses: Colorado-Startups/.github/.github/workflows/cloud-test.yml@main # replace main with a full commit SHA
+    uses: Colorado-Startups/.github/.github/workflows/cloud-test.yml@3237ce8e8c0ec337123fd2d4a0d17476caf887b1 # .github main, 2026-11-02; a newer main SHA upgrades it
     with:
       ref: ${{ inputs.ref }}
       script: ${{ inputs.script || 'verify' }}
