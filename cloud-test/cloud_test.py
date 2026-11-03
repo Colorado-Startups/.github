@@ -431,7 +431,7 @@ def self_test() -> int:
     equal("verify asked for 4", plan(allow, "verify", "4")["total"], 1)
     equal("a note when shards drop", bool(plan(allow, "verify", "4")["note"]), True)
     equal("slug", plan(allow, "test:unit")["slug"], "test-unit")
-    equal("render artifacts", plan(allow, "render")["artifacts"], ["out/"])
+    equal("render artifacts", plan(allow, "render", python="3.12")["artifacts"], ["out/"])
 
     unit, verify = allow["scripts"]["test:unit"], allow["scripts"]["verify"]
     equal("one shard", argv_for(unit), ["npm", "run", "test:unit"])
