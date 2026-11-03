@@ -19,11 +19,11 @@ name: ci-pool
 description: The runner for a standard job from the org's free CI pool, and whether the change touched the job's paths.
 inputs:
   pool:
-    description: The meter's reading, always ${{ vars.CI_POOL }}. Empty means GitHub-hosted
+    description: The meter's reading, always the org variable CI_POOL. Empty means GitHub-hosted
     required: false
     default: ""
   override:
-    description: The off switch, ${{ vars.CI_RUNNER }}. A standard GitHub-hosted label wins; any other label is ignored
+    description: The off switch, the variable CI_RUNNER. A standard GitHub-hosted label wins; any other label is ignored
     required: false
     default: ""
   arch:
