@@ -1,24 +1,26 @@
 name: cloud-test
 
-# The one shared definition of a cloud test run for every Colorado Startups repo. No repo tests, builds or renders
-# on the MacBook Air (Paul, 2026-11-02), so a session runs a suite here instead, through its repo's thin caller
-# (workflow-templates/cloud-test.yml):
+# The one shared definition of a cloud test run for every Colorado Startups repo. Cloud first, the Mac last and
+# small (Paul, 2026-11-02): test suites, builds, browsers and renders run on hosted runners, so a session runs one
+# through its repo's thin caller (workflow-templates/cloud-test.yml):
 #
-#   gh workflow run cloud-test.yml -f ref=<sha or branch> -f script=<name> -f shards=<1 to 8>
+#   gh workflow run cloud-test.yml --ref <branch> -f script=<name> -f shards=<1 to 8>
 #   gh run list --workflow cloud-test.yml --limit 1, then gh run view <id>
 #
-# The caller repo holds the allowlist, .github/cloud-test.json: each name maps to an argv that no shell reads.
-# cloud-test/cloud_test.py in this repo validates the inputs and the allowlist, plans the shards and runs one; this
-# file only wires runners to it. Each job checks that script out of this repo at job.workflow_sha, the commit the
-# caller pinned, so the caller's pin covers every file that runs. cloud-test/README.md has the allowlist format.
+# The caller repo holds the allowlist, .github/cloud-test.json. The plan job reads it from the caller's default
+# branch, or on a pull request from the merge commit that the caller workflow itself came from, and never from the
+# `ref` input. It passes the one validated entry to the shards as JSON through env, so no shard reads an allowlist
+# from the code under test. cloud-test/cloud_test.py in this repo holds every rule; this file only wires runners
+# to it. Each job checks that script out of this repo at job.workflow_sha, the commit the caller pinned, so the
+# caller's pin covers every file that runs. cloud-test/README.md has the allowlist format.
 #
-# Runners: every shard runs on the CI_RUNNER variable, the caller repository's value or else the organization's, so
-# one organization variable moves every repo at once. It takes a plain label or a JSON value, the form legallas's
-# ci.yml reads from the same variable; unset, it is ubuntu-latest. The plan job takes seconds and always runs on
-# GitHub-hosted ubuntu-slim, as legallas's choose-runner does.
+# Money: free tiers and included minutes only (Paul, 2026-11-02). Shards run on the CI_RUNNER variable, a plain
+# label, else ubuntu-latest; cloud_test.py refuses larger and self-hosted runners. Every job has a timeout.
+# Concurrency and path filters belong to the caller.
 #
 # Security: inputs reach a shell only through env, and cloud_test.py validates each before anything uses it. A
-# read-only token, no secrets, every action pinned to a full SHA. Concurrency belongs to the caller.
+# read-only token, no secrets, every action pinned to a full SHA. The plan job has no cache access and the shards
+# may only restore, so code under test can never write a cache another run restores.
 on:
   workflow_call:
     inputs:
@@ -52,8 +54,11 @@ permissions:
 
 jobs:
   plan:
+    # A standard GitHub-hosted runner on purpose, not CI_RUNNER: this job only validates and plans, in seconds, on
+    # the cheapest runner the included minutes cover.
     runs-on: ubuntu-slim
     timeout-minutes: 5
+    cache-mode: none
     outputs:
       script: ${{ steps.plan.outputs.script }}
       slug: ${{ steps.plan.outputs.slug }}
@@ -62,9 +67,8 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       timeout: ${{ steps.plan.outputs.timeout }}
       runner: ${{ steps.plan.outputs.runner }}
-      cache: ${{ steps.plan.outputs.cache }}
+      entry: ${{ steps.plan.outputs.entry }}
       artifacts: ${{ steps.plan.outputs.artifacts }}
-      node_modules: ${{ steps.plan.outputs.node_modules }}
       pip: ${{ steps.plan.outputs.pip }}
     steps:
       - name: Check out cloud_test.py at the pinned commit
@@ -75,39 +79,44 @@ jobs:
           sparse-checkout: cloud-test
           persist-credentials: false
 
-      - name: Check the ref
+      - name: Check the ref and resolve it to one commit
+        id: ref
         env:
           REF: ${{ inputs.ref || github.sha }}
-        run: python3 -I cloud-test/cloud_test.py ref --ref="$REF"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I cloud-test/cloud_test.py ref --ref="$REF"
+          echo "sha=$(python3 -I cloud-test/cloud_test.py resolve --ref="$REF")" >> "$GITHUB_OUTPUT"
 
+      # The allowlist comes from where the caller workflow came from: the default branch, or a pull request's merge
+      # commit (the caller file on that commit already decides what runs). A dispatched ref never supplies it.
       - name: Check out the caller's allowlist
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.sha || github.event.repository.default_branch }}
           path: caller
           sparse-checkout: .github/cloud-test.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      # The ref resolves to one commit here, so every shard tests the same code even if the branch moves.
       - name: Plan the shards
         id: plan
         env:
-          REF: ${{ inputs.ref || github.sha }}
+          SHA: ${{ steps.ref.outputs.sha }}
           SCRIPT: ${{ inputs.script }}
           SHARDS: ${{ inputs.shards }}
           PYTHON: ${{ inputs.python }}
           CI_RUNNER: ${{ vars.CI_RUNNER }}
         run: |
-          sha="$(git -C caller rev-parse HEAD 2>/dev/null || printf '%s' "$REF")"
           python3 -I cloud-test/cloud_test.py plan --allowlist=caller/.github/cloud-test.json \
-            --script="$SCRIPT" --shards="$SHARDS" --python="$PYTHON" --sha="$sha"
+            --script="$SCRIPT" --shards="$SHARDS" --python="$PYTHON" --sha="$SHA"
 
   run:
     needs: plan
     name: ${{ needs.plan.outputs.script }} ${{ matrix.shard }}/${{ needs.plan.outputs.total }}
     runs-on: ${{ fromJSON(needs.plan.outputs.runner) }}
     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout) }}
+    cache-mode: read
     strategy:
       fail-fast: false
       matrix:
@@ -132,16 +141,9 @@ jobs:
           persist-credentials: false
       - run: if [ -d .git/info ]; then echo /.cloud-test/ >> .git/info/exclude; fi
 
-      - if: needs.plan.outputs.cache != ''
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ needs.plan.outputs.cache }}
-          key: cloud-test-${{ needs.plan.outputs.slug }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'package-lock.json', 'requirements*.txt') }}
-
       - uses: ./.cloud-test/.github/actions/setup
         with:
           node-version: ${{ inputs.node-version }}
-          node-modules: ${{ needs.plan.outputs.node_modules }}
           python-version: ${{ inputs.python }}
           pip-requirements: ${{ needs.plan.outputs.pip }}
 
@@ -150,11 +152,11 @@ jobs:
           SCRIPT: ${{ needs.plan.outputs.script }}
           INDEX: ${{ matrix.shard }}
           TOTAL: ${{ needs.plan.outputs.total }}
+          CLOUD_TEST_ENTRY: ${{ needs.plan.outputs.entry }}
           CLOUD_TEST_REF: ${{ needs.plan.outputs.sha }}
           CLOUD_TEST_RUNNER: ${{ needs.plan.outputs.runner }}
         run: |
-          python3 -I .cloud-test/cloud-test/cloud_test.py run --allowlist=.github/cloud-test.json \
-            --script="$SCRIPT" --index="$INDEX" --total="$TOTAL"
+          python3 -I .cloud-test/cloud-test/cloud_test.py run --script="$SCRIPT" --index="$INDEX" --total="$TOTAL"
 
       - if: always() && needs.plan.outputs.artifacts != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

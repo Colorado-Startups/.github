@@ -3,13 +3,15 @@ name: cloud-test
 # ADVISORY. No ruleset requires this check, so it reports and never blocks a merge.
 #
 # Runs a name from .github/cloud-test.json on a hosted runner through the shared workflow in Colorado-Startups/.github
-# (cloud-test/README.md there). No repo tests, builds or renders on the MacBook Air (Paul, 2026-11-02), so a
-# session dispatches it instead:
+# (cloud-test/README.md there). Cloud first, the Mac last and small (Paul, 2026-11-02): suites, builds, browsers
+# and renders run here, so a session dispatches them instead:
 #
-#   gh workflow run cloud-test.yml -f ref=<sha or branch> -f script=<name> -f shards=<1 to 8>
+#   gh workflow run cloud-test.yml --ref <branch> -f script=<name> -f shards=<1 to 8>
 #   gh run list --workflow cloud-test.yml --limit 1, then gh run view <id>
 #
-# A pull request that changes this file or the allowlist runs the default script once, which proves the wiring.
+# The allowlist is read from the default branch, or on a pull request from its merge commit; a `ref` input tests
+# another commit with that allowlist. A pull request that changes this file or the allowlist runs the default
+# script once, which proves the wiring; the path filter keeps every other pull request from spending minutes.
 # Pin the shared workflow to a full commit SHA of Colorado-Startups/.github main, never a branch.
 on:
   pull_request:

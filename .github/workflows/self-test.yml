@@ -6,10 +6,25 @@ name: self-test
 # way a repo's caller does, from this commit: the plan job, a two-shard matrix, the checkout of cloud_test.py at
 # job.workflow_sha, the setup action's Node and Python paths, the {index}/{total} shard flag and the job summary.
 # A dispatch reaches only a workflow already on main, so this pull request run is how a change here gets tested.
+# Path filters keep doc-only changes from spending minutes (Paul's money rule, 2026-11-02).
 on:
   pull_request:
+    paths:
+      - cloud-test/**
+      - .github/workflows/cloud-test.yml
+      - .github/workflows/self-test.yml
+      - .github/actions/**
+      - .github/cloud-test.json
+      - workflow-templates/**
   push:
     branches: [main]
+    paths:
+      - cloud-test/**
+      - .github/workflows/cloud-test.yml
+      - .github/workflows/self-test.yml
+      - .github/actions/**
+      - .github/cloud-test.json
+      - workflow-templates/**
   workflow_dispatch:
 
 permissions:

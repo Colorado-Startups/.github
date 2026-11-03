@@ -3,22 +3,18 @@
 #
 #   - uses: Colorado-Startups/.github/.github/actions/setup@<sha>
 #
-# Node comes from node-version, else from .nvmrc, else the runner's own. When package-lock.json exists, the
-# node-modules paths are restored from a cache keyed on .nvmrc, the lockfile and node-version, so `npm ci` runs
-# only on a cache miss and a lockfile change never reuses a stale install. Python comes from python-version, and
-# pip-requirements are installed with pip's download cache; without python-version the runner's python3 stays.
-# Every input reaches a shell only through env.
+# Node comes from node-version, else from .nvmrc, else the runner's own. When package-lock.json exists, npm's
+# download cache is restored by actions/setup-node and `npm ci` always runs, so no job ever restores a node_modules
+# tree that another run built. Python comes from python-version, and pip-requirements are installed with pip's
+# download cache; without python-version the runner's python3 stays. In a job with `cache-mode: read`, as on every
+# cloud-test shard, the caches only restore. Every input reaches a shell only through env.
 name: setup
-description: Node from a version or .nvmrc with node_modules cached on the lockfile, and Python with pip requirements.
+description: Node from a version or .nvmrc with npm ci on npm's download cache, and Python with pip requirements.
 inputs:
   node-version:
     description: Node version. Empty uses .nvmrc when the repo has one
     required: false
     default: ""
-  node-modules:
-    description: The node_modules paths to cache, one per line (the root and each workspace)
-    required: false
-    default: node_modules
   python-version:
     description: Python version. Empty keeps the runner's python3
     required: false
@@ -40,20 +36,20 @@ runs:
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: ${{ inputs.node-version }}
+        cache: ${{ steps.detect.outputs.lockfile == 'true' && 'npm' || '' }}
 
     - if: inputs.node-version == '' && steps.detect.outputs.nvmrc == 'true'
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .nvmrc
+        cache: ${{ steps.detect.outputs.lockfile == 'true' && 'npm' || '' }}
+
+    - if: inputs.node-version == '' && steps.detect.outputs.nvmrc != 'true' && steps.detect.outputs.lockfile == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        cache: npm
 
     - if: steps.detect.outputs.lockfile == 'true'
-      id: modules
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ${{ inputs.node-modules }}
-        key: node-modules-${{ runner.os }}-${{ runner.arch }}-${{ inputs.node-version }}-${{ hashFiles('.nvmrc', 'package-lock.json') }}
-
-    - if: steps.detect.outputs.lockfile == 'true' && steps.modules.outputs.cache-hit != 'true'
       shell: bash
       run: npm ci
 
