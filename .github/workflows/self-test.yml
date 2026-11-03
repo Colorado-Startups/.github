@@ -1,0 +1,40 @@
+name: self-test
+
+# ADVISORY until a ruleset requires it; the orchestrator merges only when every check is green.
+#
+# self-test runs cloud_test.py's seeded known-bad and known-clean inputs. smoke then calls the shared workflow the
+# way a repo's caller does, from this commit: the plan job, a two-shard matrix, the checkout of cloud_test.py at
+# job.workflow_sha, the setup action's Node and Python paths, the {index}/{total} shard flag and the job summary.
+# A dispatch reaches only a workflow already on main, so this pull request run is how a change here gets tested.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  self-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -I cloud-test/cloud_test.py --self-test
+      - run: python3 -I cloud-test/cloud_test.py check --allowlist=.github/cloud-test.json
+
+  smoke:
+    needs: self-test
+    uses: ./.github/workflows/cloud-test.yml
+    with:
+      script: smoke
+      shards: "2"
+      node-version: lts/*
+      python: "3.x"

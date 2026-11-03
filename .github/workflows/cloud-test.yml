@@ -1,0 +1,165 @@
+name: cloud-test
+
+# The one shared definition of a cloud test run for every Colorado Startups repo. No repo tests, builds or renders
+# on the MacBook Air (Paul, 2026-11-02), so a session runs a suite here instead, through its repo's thin caller
+# (workflow-templates/cloud-test.yml):
+#
+#   gh workflow run cloud-test.yml -f ref=<sha or branch> -f script=<name> -f shards=<1 to 8>
+#   gh run list --workflow cloud-test.yml --limit 1, then gh run view <id>
+#
+# The caller repo holds the allowlist, .github/cloud-test.json: each name maps to an argv that no shell reads.
+# cloud-test/cloud_test.py in this repo validates the inputs and the allowlist, plans the shards and runs one; this
+# file only wires runners to it. Each job checks that script out of this repo at job.workflow_sha, the commit the
+# caller pinned, so the caller's pin covers every file that runs. cloud-test/README.md has the allowlist format.
+#
+# Runners: every shard runs on the CI_RUNNER variable, the caller repository's value or else the organization's, so
+# one organization variable moves every repo at once. It takes a plain label or a JSON value, the form legallas's
+# ci.yml reads from the same variable; unset, it is ubuntu-latest. The plan job takes seconds and always runs on
+# GitHub-hosted ubuntu-slim, as legallas's choose-runner does.
+#
+# Security: inputs reach a shell only through env, and cloud_test.py validates each before anything uses it. A
+# read-only token, no secrets, every action pinned to a full SHA. Concurrency belongs to the caller.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit SHA or branch to test. Empty tests the commit the caller ran on
+        required: false
+        default: ""
+        type: string
+      script:
+        description: A name from the caller's .github/cloud-test.json
+        required: true
+        type: string
+      shards:
+        description: Parallel shards, 1 to 8. A script with no shard entry runs as one job
+        required: false
+        default: "1"
+        type: string
+      node-version:
+        description: Node version for actions/setup-node. Empty uses .nvmrc when the repo has one
+        required: false
+        default: ""
+        type: string
+      python:
+        description: Python version for actions/setup-python. Empty uses the runner's python3
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      script: ${{ steps.plan.outputs.script }}
+      slug: ${{ steps.plan.outputs.slug }}
+      sha: ${{ steps.plan.outputs.sha }}
+      total: ${{ steps.plan.outputs.total }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      timeout: ${{ steps.plan.outputs.timeout }}
+      runner: ${{ steps.plan.outputs.runner }}
+      cache: ${{ steps.plan.outputs.cache }}
+      artifacts: ${{ steps.plan.outputs.artifacts }}
+      node_modules: ${{ steps.plan.outputs.node_modules }}
+      pip: ${{ steps.plan.outputs.pip }}
+    steps:
+      - name: Check out cloud_test.py at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: cloud-test
+          persist-credentials: false
+
+      - name: Check the ref
+        env:
+          REF: ${{ inputs.ref || github.sha }}
+        run: python3 -I cloud-test/cloud_test.py ref --ref="$REF"
+
+      - name: Check out the caller's allowlist
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          path: caller
+          sparse-checkout: .github/cloud-test.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # The ref resolves to one commit here, so every shard tests the same code even if the branch moves.
+      - name: Plan the shards
+        id: plan
+        env:
+          REF: ${{ inputs.ref || github.sha }}
+          SCRIPT: ${{ inputs.script }}
+          SHARDS: ${{ inputs.shards }}
+          PYTHON: ${{ inputs.python }}
+          CI_RUNNER: ${{ vars.CI_RUNNER }}
+        run: |
+          sha="$(git -C caller rev-parse HEAD 2>/dev/null || printf '%s' "$REF")"
+          python3 -I cloud-test/cloud_test.py plan --allowlist=caller/.github/cloud-test.json \
+            --script="$SCRIPT" --shards="$SHARDS" --python="$PYTHON" --sha="$sha"
+
+  run:
+    needs: plan
+    name: ${{ needs.plan.outputs.script }} ${{ matrix.shard }}/${{ needs.plan.outputs.total }}
+    runs-on: ${{ fromJSON(needs.plan.outputs.runner) }}
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      # Second, because a checkout into the workspace root clears what is there. .git/info/exclude keeps it out of
+      # git status and git ls-files, which most repo gates walk.
+      - name: Check out cloud_test.py and the setup action at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .cloud-test
+          sparse-checkout: |
+            cloud-test
+            .github/actions/setup
+          persist-credentials: false
+      - run: if [ -d .git/info ]; then echo /.cloud-test/ >> .git/info/exclude; fi
+
+      - if: needs.plan.outputs.cache != ''
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ needs.plan.outputs.cache }}
+          key: cloud-test-${{ needs.plan.outputs.slug }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'package-lock.json', 'requirements*.txt') }}
+
+      - uses: ./.cloud-test/.github/actions/setup
+        with:
+          node-version: ${{ inputs.node-version }}
+          node-modules: ${{ needs.plan.outputs.node_modules }}
+          python-version: ${{ inputs.python }}
+          pip-requirements: ${{ needs.plan.outputs.pip }}
+
+      - name: Run the script
+        env:
+          SCRIPT: ${{ needs.plan.outputs.script }}
+          INDEX: ${{ matrix.shard }}
+          TOTAL: ${{ needs.plan.outputs.total }}
+          CLOUD_TEST_REF: ${{ needs.plan.outputs.sha }}
+          CLOUD_TEST_RUNNER: ${{ needs.plan.outputs.runner }}
+        run: |
+          python3 -I .cloud-test/cloud-test/cloud_test.py run --allowlist=.github/cloud-test.json \
+            --script="$SCRIPT" --index="$INDEX" --total="$TOTAL"
+
+      - if: always() && needs.plan.outputs.artifacts != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cloud-test-${{ needs.plan.outputs.slug }}-${{ matrix.shard }}-of-${{ needs.plan.outputs.total }}
+          path: ${{ needs.plan.outputs.artifacts }}
+          retention-days: 7
+          if-no-files-found: warn

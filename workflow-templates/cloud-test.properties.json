@@ -1,0 +1,6 @@
+{
+  "name": "cloud-test",
+  "description": "Run an allowlisted test, build or render from .github/cloud-test.json on a hosted runner, sharded, through the shared Colorado Startups workflow.",
+  "categories": ["Continuous integration"],
+  "filePatterns": [".github/cloud-test.json"]
+}

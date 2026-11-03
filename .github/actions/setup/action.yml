@@ -1,0 +1,77 @@
+# The setup a Colorado Startups CI job shares, after actions/checkout. The shared cloud-test workflow runs it on
+# every shard, and any repo's own workflow may call it too, pinned to a full SHA:
+#
+#   - uses: Colorado-Startups/.github/.github/actions/setup@<sha>
+#
+# Node comes from node-version, else from .nvmrc, else the runner's own. When package-lock.json exists, the
+# node-modules paths are restored from a cache keyed on .nvmrc, the lockfile and node-version, so `npm ci` runs
+# only on a cache miss and a lockfile change never reuses a stale install. Python comes from python-version, and
+# pip-requirements are installed with pip's download cache; without python-version the runner's python3 stays.
+# Every input reaches a shell only through env.
+name: setup
+description: Node from a version or .nvmrc with node_modules cached on the lockfile, and Python with pip requirements.
+inputs:
+  node-version:
+    description: Node version. Empty uses .nvmrc when the repo has one
+    required: false
+    default: ""
+  node-modules:
+    description: The node_modules paths to cache, one per line (the root and each workspace)
+    required: false
+    default: node_modules
+  python-version:
+    description: Python version. Empty keeps the runner's python3
+    required: false
+    default: ""
+  pip-requirements:
+    description: Requirement files to pip install, one per line. Needs python-version
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      run: |
+        if [ -f .nvmrc ]; then echo nvmrc=true; else echo nvmrc=false; fi >> "$GITHUB_OUTPUT"
+        if [ -f package-lock.json ]; then echo lockfile=true; else echo lockfile=false; fi >> "$GITHUB_OUTPUT"
+
+    - if: inputs.node-version != ''
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - if: inputs.node-version == '' && steps.detect.outputs.nvmrc == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+
+    - if: steps.detect.outputs.lockfile == 'true'
+      id: modules
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.node-modules }}
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-${{ inputs.node-version }}-${{ hashFiles('.nvmrc', 'package-lock.json') }}
+
+    - if: steps.detect.outputs.lockfile == 'true' && steps.modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci
+
+    - if: inputs.python-version != ''
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: ${{ inputs.pip-requirements != '' && 'pip' || '' }}
+        cache-dependency-path: ${{ inputs.pip-requirements }}
+
+    - if: inputs.pip-requirements != ''
+      shell: bash
+      env:
+        PIP_REQUIREMENTS: ${{ inputs.pip-requirements }}
+      run: |
+        set -euo pipefail
+        args=()
+        while IFS= read -r file; do
+          if [ -n "$file" ]; then args+=(--requirement "$file"); fi
+        done <<< "$PIP_REQUIREMENTS"
+        python -m pip install --quiet "${args[@]}"
