@@ -1,14 +1,14 @@
 name: ci-pool-meter
 
-# The org CI pool's meter (Paul, 2026-11-03: "No one repo gets assigned the minutes"). Once an hour it reads every
+# The org's Blacksmith pool meter (Paul, 2026-11-04; Colorado-Startups/code-os#200). Once an hour it reads every
 # Colorado Startups repo's job records, counts the org's free Blacksmith minutes over a rolling 31 days, and writes
-# the reading to the org variable CI_POOL, which every repo's chooser reads as ${{ vars.CI_POOL }} with no token.
+# the reading to the org variable CI_POOL, which Code-OS's ci-standard.yml chooser reads as ${{ vars.CI_POOL }}.
 # ci-pool/ci_pool.py holds every rule, and ci-pool/README.md the design and what Paul creates.
 #
 # This repo is public, so these minutes on a standard runner cost nothing. The App's key lives in the
 # `ci-pool-meter` environment, which only main may use, so no pull request run can reach it. Until Paul creates the
-# App (CI_POOL_APP_CLIENT_ID is empty), the job is skipped, CI_POOL stays empty, and every chooser picks GitHub-hosted.
-# A pass that cannot read leaves CI_POOL as it was; three hours later the chooser calls it stale, GitHub-hosted again.
+# App (CI_POOL_APP_CLIENT_ID is empty), the job is skipped, CI_POOL stays empty, and every job stays on GitHub-hosted.
+# A pass that cannot read leaves CI_POOL as it was; 75 minutes after its time the chooser calls it stale.
 # GitHub turns off a public repo's schedule after 60 days with no activity; that also fails safe the same way.
 on:
   schedule:
@@ -35,7 +35,7 @@ jobs:
           persist-credentials: false
 
       # The ledger: each finished run's minutes, so a pass reads only what is new. A lost ledger only costs reads;
-      # until the meter catches up its reading says complete: false and the chooser stays on GitHub-hosted.
+      # until the meter catches up its reading says complete: false, which the chooser treats as no reading.
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ledger.json
