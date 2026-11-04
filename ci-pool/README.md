@@ -69,7 +69,7 @@ stays empty and every job stays on GitHub-hosted.
 
 | # | Where | What |
 | --- | --- | --- |
-| 1 | blacksmith.sh | Sign up with GitHub, and install the Blacksmith GitHub App on Colorado-Startups |
+| 1 | blacksmith.sh | Done: the `blacksmith-sh` App (id 807020) has been on Colorado-Startups, all repositories, since 2026-10-31 (`gh api /orgs/Colorado-Startups/installations`, read 2026-11-04). The same install runs [code]smith; there is no second Blacksmith App |
 | 2 | github.com/organizations/Colorado-Startups/settings/apps/new | Name `colorado-startups-ci-pool`. Webhook off. Only this account may install it |
 | 3 | Same page | Repository: **Actions: Read** (Metadata: Read comes with it). Organization: **Variables: Read and write**. Nothing else |
 | 4 | The App's page | Install App on Colorado-Startups, **All repositories**. Then generate a private key |
