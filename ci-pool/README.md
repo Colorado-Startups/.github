@@ -1,7 +1,7 @@
 # ci-pool
 
 The org's Blacksmith pool meter. Paul, 2026-11-04: Blacksmith's free tier takes the Colorado Startups org's CI
-overflow ([code-os#200](https://github.com/Colorado-Startups/code-os/issues/200)). Free tiers and included minutes
+overflow ([code-os#200](https://github.com/Colorado-Startups/git-crafter-overlay/blob/main/archive/code-os/200.md)). Free tiers and included minutes
 only, never pay-per-use on a card (Paul, 2026-11-02). The house rule is `~/.claude/rules/compute.md` (canonical:
 Code-OS `rules/compute.md`); where it and this page disagree, the rule wins. The chooser that reads the meter is a job
 in Code-OS's `ci-standard.yml`; this folder only measures.

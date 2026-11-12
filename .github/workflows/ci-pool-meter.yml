@@ -1,9 +1,9 @@
 name: ci-pool-meter
 
-# The org's Blacksmith pool meter (Paul, 2026-11-04; Colorado-Startups/code-os#200). Once an hour it reads every
-# Colorado Startups repo's job records, counts the org's free Blacksmith minutes over a rolling 31 days, and writes
-# the reading to the org variable CI_POOL, which Code-OS's ci-standard.yml chooser reads as ${{ vars.CI_POOL }}.
-# ci-pool/ci_pool.py holds every rule, and ci-pool/README.md the design and what Paul creates.
+# The org's Blacksmith pool meter (Paul, 2026-11-04; code-os#200 (git-crafter-overlay archive/code-os/200.md)).
+# Once an hour it reads every Colorado Startups repo's job records, counts the org's free Blacksmith minutes over a
+# rolling 31 days, and writes the reading to the org variable CI_POOL, which Code-OS's ci-standard.yml chooser reads
+# as ${{ vars.CI_POOL }}. ci-pool/ci_pool.py holds every rule, and ci-pool/README.md the design and what Paul creates.
 #
 # This repo is public, so these minutes on a standard runner cost nothing. The App's key lives in the
 # `ci-pool-meter` environment, which only main may use, so no pull request run can reach it. Until Paul creates the
