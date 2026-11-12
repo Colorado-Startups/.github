@@ -2,9 +2,9 @@
 """The org's Blacksmith pool meter: how many of Blacksmith's free minutes every Colorado Startups repo has used, and the
 stop past which no job may go to Blacksmith.
 
-Paul, 2026-11-04: Blacksmith's free tier takes the org's CI overflow (Colorado-Startups/code-os#200). Free tiers and
-included minutes only, never pay-per-use on a card (Paul, 2026-11-02). The chooser that reads this meter is a job in
-Code-OS's ci-standard.yml; this file only measures.
+Paul, 2026-11-04: Blacksmith's free tier takes the org's CI overflow (code-os#200 (git-crafter-overlay
+archive/code-os/200.md)). Free tiers and included minutes only, never pay-per-use on a card (Paul, 2026-11-02). The
+chooser that reads this meter is a job in Code-OS's ci-standard.yml; this file only measures.
 
     ci_pool.py meter --org=ORG --ledger=FILE [--write]
         Reads every repo's job records with $GH_TOKEN (the meter App's token), updates the ledger and prints the
