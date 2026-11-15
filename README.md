@@ -2,6 +2,8 @@
 
 The Colorado Startups organization's `.github` repository. It holds the organization's profile page and the CI tooling its repositories share.
 
+Brand: [Colorado Startups brand guide](https://colorado-startups.github.io/brand/)
+
 | Path | What it is |
 |---|---|
 | [`profile/`](profile/README.md) | The organization's profile page |
