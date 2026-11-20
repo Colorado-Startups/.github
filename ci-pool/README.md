@@ -52,6 +52,24 @@ the next reading lands. So the stop sits that far under the free minutes.
 Blacksmith has no public usage API. Its CLI's `blacksmith usage --since 30d --breakdown-by repo` needs an org token, so
 it is the monthly cross-check, not the source.
 
+## Backstop: Blacksmith's runner groups (tested 2026-11-20)
+
+The meter's stop moves new jobs to GitHub-hosted. The backstop stops a repo's Blacksmith jobs outright, for when a
+workflow hard-codes a Blacksmith label.
+
+| Question | Answer | How we know |
+| --- | --- | --- |
+| Does the org "self-hosted runners" switch stop Blacksmith? | No. It disables repository-level runners only; Blacksmith's are org-level | GitHub docs, "Disabling or limiting self-hosted runners" |
+| Where are Blacksmith's runners? | Several org runner groups whose names start with "Blacksmith": "Blacksmith runners …" (ids 3, 4, 5) and "Blacksmith scale sets - blacksmith-2vcpu-ubuntu-2404" (id 6) | `GET /orgs/Colorado-Startups/actions/runner-groups`, read 2026-11-20 |
+| Does taking a repo out of every Blacksmith group stop its jobs? | Yes. The probe repo's Blacksmith job queued for 8.5 minutes and did not run | Probe 3 |
+| Does Blacksmith's App put the access back? | No, not within those 8.5 minutes | Groups read again after probe 3 |
+| How fast does it act? | About 10 seconds. A job that starts inside that lag still runs | Probe 2 ran; probe 3 queued |
+| Does restoring release the queue? | Yes. Visibility back to `all` ran the queued job in about 30 seconds | Restore, then probe 3's job log |
+
+The test ran from a one-off `runner-group-probe` workflow through the `colorado-startups-ci-pool` App with
+**Organization self-hosted runners: Read and write** added. The workflow is removed; its last version is in #16. The
+test repo `ci-pool-probe` is archived.
+
 ## The reading (`CI_POOL`, version 2)
 
 | Field | Chooser rule |
