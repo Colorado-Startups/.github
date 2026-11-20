@@ -73,13 +73,15 @@ jobs:
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
                   out.write("```json\n" + json.dumps(line, indent=1) + "\n```\n")
 
+          # Blacksmith keeps more than one group per org: "blacksmith runners ..." for its older just-in-time runners and
+          # "blacksmith scale sets - <label>" per runner label (job records, 2026-11-20). The test covers them all.
           groups = call("GET", f"/orgs/{ORG}/actions/runner-groups?per_page=100")["runner_groups"]
           found = [g for g in groups if g["name"].lower().startswith("blacksmith")]
           print("groups:", [(g["id"], g["name"], g["visibility"]) for g in groups])
-          if len(found) != 1:
-              raise SystemExit(f"expected one Blacksmith group, found {len(found)}")
-          group = found[0]
-          show(group)
+          if not found:
+              raise SystemExit("no Blacksmith runner group")
+          for group in found:
+              show(group)
 
           action = os.environ["ACTION"]
           if action == "restrict":
@@ -91,11 +93,18 @@ jobs:
                       break
                   page += 1
               keep = [r["id"] for r in repos if r["name"] != os.environ["PROBE"]]
+              print(f"the App sees {len(repos)} repositories; {len(keep)} keep access")
               if len(keep) == len(repos):
                   raise SystemExit(f"{os.environ['PROBE']} is not among the App's repositories")
-              call("PATCH", f"/orgs/{ORG}/actions/runner-groups/{group['id']}", {"visibility": "selected"})
-              call("PUT", f"/orgs/{ORG}/actions/runner-groups/{group['id']}/repositories", {"selected_repository_ids": keep})
+              if not keep:
+                  raise SystemExit("nothing would keep access: refusing to lock out every repository")
+              for group in found:
+                  call("PATCH", f"/orgs/{ORG}/actions/runner-groups/{group['id']}", {"visibility": "selected"})
+                  call("PUT", f"/orgs/{ORG}/actions/runner-groups/{group['id']}/repositories",
+                       {"selected_repository_ids": keep})
           elif action == "restore":
-              call("PATCH", f"/orgs/{ORG}/actions/runner-groups/{group['id']}", {"visibility": "all"})
+              for group in found:
+                  call("PATCH", f"/orgs/{ORG}/actions/runner-groups/{group['id']}", {"visibility": "all"})
           if action != "read":
-              show(call("GET", f"/orgs/{ORG}/actions/runner-groups/{group['id']}"))
+              for group in found:
+                  show(call("GET", f"/orgs/{ORG}/actions/runner-groups/{group['id']}"))
