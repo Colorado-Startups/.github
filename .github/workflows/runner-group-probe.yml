@@ -1,0 +1,101 @@
+name: runner-group-probe
+
+# A one-off test (2026-11-20) for the Blacksmith pool's backstop: when the meter reaches the free 3,000 minutes, can the
+# org take a repo out of Blacksmith's runner group so its Blacksmith jobs wait instead of running and billing? GitHub's
+# docs say the org "self-hosted runners" switch only stops repository-level runners, and Blacksmith's are org-level,
+# in their own group. Blacksmith's App manages that group, so it might put the access back: this is what we test.
+#
+#   read      prints the Blacksmith group: visibility and, when selected, its repos
+#   restrict  every repo the App sees keeps access except `probe_repo`
+#   restore   visibility back to `all`
+#
+# It runs through the colorado-startups-ci-pool App (organization self-hosted runners: write), whose key only main may
+# use through the ci-pool-meter environment. Delete this file once the test is recorded in ci-pool/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [read, restrict, restore]
+        default: read
+      probe_repo:
+        type: string
+        default: ci-pool-probe
+
+permissions: {}
+
+concurrency:
+  group: runner-group-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main' && vars.CI_POOL_APP_CLIENT_ID != ''
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    environment: ci-pool-meter
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.CI_POOL_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_POOL_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: ${{ inputs.action }} Blacksmith's runner group
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ORG: ${{ github.repository_owner }}
+          ACTION: ${{ inputs.action }}
+          PROBE: ${{ inputs.probe_repo }}
+        shell: python3 -I {0}
+        run: |
+          import json, os, urllib.request
+
+          API, ORG = "https://api.github.com", os.environ["ORG"]
+
+          def call(method, path, body=None):
+              req = urllib.request.Request(API + path, method=method, data=None if body is None else json.dumps(body).encode(),
+                                           headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                                                    "Accept": "application/vnd.github+json",
+                                                    "X-GitHub-Api-Version": "2022-11-28"})
+              with urllib.request.urlopen(req, timeout=30) as res:
+                  raw = res.read()
+              return json.loads(raw) if raw else None
+
+          def show(group):
+              line = {k: group.get(k) for k in ("id", "name", "visibility", "default", "allows_public_repositories",
+                                                 "restricted_to_workflows", "inherited")}
+              if group.get("visibility") == "selected":
+                  repos = call("GET", f"/orgs/{ORG}/actions/runner-groups/{group['id']}/repositories?per_page=100")
+                  line["repositories"] = sorted(r["name"] for r in repos["repositories"])
+              print(json.dumps(line, indent=1))
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+                  out.write("```json\n" + json.dumps(line, indent=1) + "\n```\n")
+
+          groups = call("GET", f"/orgs/{ORG}/actions/runner-groups?per_page=100")["runner_groups"]
+          found = [g for g in groups if g["name"].lower().startswith("blacksmith")]
+          print("groups:", [(g["id"], g["name"], g["visibility"]) for g in groups])
+          if len(found) != 1:
+              raise SystemExit(f"expected one Blacksmith group, found {len(found)}")
+          group = found[0]
+          show(group)
+
+          action = os.environ["ACTION"]
+          if action == "restrict":
+              repos, page = [], 1
+              while True:
+                  batch = call("GET", f"/installation/repositories?per_page=100&page={page}")["repositories"]
+                  repos += batch
+                  if len(batch) < 100:
+                      break
+                  page += 1
+              keep = [r["id"] for r in repos if r["name"] != os.environ["PROBE"]]
+              if len(keep) == len(repos):
+                  raise SystemExit(f"{os.environ['PROBE']} is not among the App's repositories")
+              call("PATCH", f"/orgs/{ORG}/actions/runner-groups/{group['id']}", {"visibility": "selected"})
+              call("PUT", f"/orgs/{ORG}/actions/runner-groups/{group['id']}/repositories", {"selected_repository_ids": keep})
+          elif action == "restore":
+              call("PATCH", f"/orgs/{ORG}/actions/runner-groups/{group['id']}", {"visibility": "all"})
+          if action != "read":
+              show(call("GET", f"/orgs/{ORG}/actions/runner-groups/{group['id']}"))
